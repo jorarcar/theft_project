@@ -1,0 +1,238 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+Testing Poisson, Quassi-poisson and negative binomial in R.
+
+```{r}
+library(ggplot2)
+library(dplyr)
+library(readr)
+
+df = read.csv(file="df_model_dias_esp.csv",header = TRUE)
+head(df)
+```
+
+Cambiando los tipos de variables:
+
+```{r}
+df$Barrio = as.factor(df$Barrio)
+df$Arma.empleada = as.factor(df$Arma.empleada)
+df$Categoria.de.sitio = as.factor(df$Categoria.de.sitio)
+df$Year = as.factor(df$Year)
+df$Month = as.factor(df$Month)
+df$WeekDay = as.factor(df$WeekDay)
+df$Timeframe = as.factor(df$Timeframe)
+df$Quincena = as.factor(df$Quincena)
+df$Carnaval = as.factor(df$Carnaval)
+df$Dia_Madre = as.factor(df$Dia_Madre)
+```
+
+Agregando las variables para el conteo:
+
+```{r}
+df %>%
+  group_by(Barrio, Year, WeekDay, 
+             Timeframe)%>%
+  summarise(Robos=sum(Cantidad), .groups="drop") -> df_grouped
+```
+
+
+```{r}
+mod1 <- glm(Robos ~ Barrio + WeekDay + Timeframe, family="poisson"(link="log"), data=df_grouped)
+summary(mod1)
+```
+
+
+```{r}
+media = mean(df_grouped$Robos)
+varianza = var(df_grouped$Robos)
+media
+varianza
+```
+
+```{r}
+#Deviance/gl ratio
+25917/22853
+```
+
+
+```{r}
+Pearsonchi2 <- sum(residuals(mod1,type="pearson")^2)
+Pearsonchi2
+Pearsonchi2 / 22853
+```
+
+
+Esto implica que tenemos un problema de sobre-dispersión en los datos, pero no tan alto, ya que los coeficientes son muy cercanos a uno. 
+
+Comprobemos las métricas del modelo, para esto, dividiremos nuestro dataset en train y test:
+
+```{r}
+# load the libraries
+library(caret)
+
+set.seed(30)
+# define an 80%/20% train/test split of the dataset
+split=0.80
+
+trainIndex <- createDataPartition(df_grouped$Robos, p=split, list=FALSE)
+data_train <- df_grouped[ trainIndex,]
+data_test <- df_grouped[-trainIndex,]
+
+# train a Poisson regressor
+pois_model <- glm(Robos ~ Barrio + WeekDay + Timeframe, family="poisson"(link="log"), data=data_train)
+
+# make predictions
+x_test <- select(data_test, c(Barrio, WeekDay, Timeframe))
+y_test <- data_test$Robos
+predictions <- predict(pois_model, x_test)
+```
+
+Calculemos ahora las métricas:
+
+```{r}
+x_train <- select(data_train,c(Barrio,WeekDay, Timeframe))
+y_train <- data_train$Robos
+
+data.frame(
+  R2 = R2(predict(pois_model, x_train), y_train),
+  RMSE = RMSE(predict(pois_model, x_train), y_train),
+  MAE = MAE(predict(pois_model, x_train), y_train)
+)
+```
+
+
+```{r}
+data.frame(
+  R2 = R2(predictions, y_test),
+  RMSE = RMSE(predictions, y_test),
+  MAE = MAE(predictions, y_test)
+)
+```
+
+```{r}
+summary(aov(mod1))
+```
+
+```{r}
+mod2 <- update(mod1, .~.+WeekDay*Timeframe)
+anova(mod2, test="Chisq")
+```
+
+```{r}
+#load DescTools package
+library(agricolae)
+mod3 <- glm(Robos ~ WeekDay + Timeframe, family="poisson"(link="log"), data=df_grouped)
+
+#perform Scheffe's test
+scheffe.test(mod3, trt = c("WeekDay", "Timeframe"), group=TRUE, console=TRUE)
+```
+
+## Binomial Negativa
+
+Como sabemos que los datos tienen un poquito de sobre-dispersión, probemos ahora los modelos que nos permiten sortear este tipo de inconvenientes, como los quasi-poisson o los binomiales negativos:
+
+
+```{r}
+library(MASS)
+bn_mod <- glm.nb(Robos ~ Barrio + WeekDay + Timeframe, data=data_train)
+summary(bn_mod)
+```
+
+```{r}
+13242/18228
+```
+
+
+```{r}
+Pearsonchi2 <- sum(residuals(bn_mod,type="pearson")^2)
+Pearsonchi2 / 18228
+```
+
+Corriendo las predicciones:
+
+```{r}
+# make predictions
+predictions_bn <- predict(bn_mod, x_test)
+```
+
+```{r}
+#x_train <- select(data_train,c(Barrio,WeekDay, Timeframe))
+#y_train <- data_train$Robos
+
+data.frame(
+  R2 = R2(predict(bn_mod, x_train), y_train),
+  RMSE = RMSE(predict(bn_mod, x_train), y_train),
+  MAE = MAE(predict(bn_mod, x_train), y_train)
+)
+```
+
+Calculemos ahora las métricas:
+
+```{r}
+data.frame(
+  R2 = R2(predictions_bn, y_test),
+  RMSE = RMSE(predictions_bn, y_test),
+  MAE = MAE(predictions_bn, y_test)
+)
+```
+
+## Ahora probemos con Quasi-poisson
+
+```{r}
+mod_quasi <- glm(Robos~Barrio+WeekDay+Timeframe, family="quasi"(link="log",variance="mu"), data=data_train)
+summary(mod_quasi)
+```
+
+```{r}
+20771/18228
+```
+
+
+```{r}
+Pearsonchi2 <- sum(residuals(mod_quasi,type="pearson")^2)
+Pearsonchi2 / 18228
+```
+
+
+```{r}
+# make predictions
+predictions_q <- predict(mod_quasi, x_test)
+```
+
+Métricas en el train: 
+
+```{r}
+data.frame(
+  R2 = R2(predict(mod_quasi, x_train), y_train),
+  RMSE = RMSE(predict(mod_quasi, x_train), y_train),
+  MAE = MAE(predict(mod_quasi, x_train), y_train)
+)
+```
+
+Calculemos ahora las métricas en el test:
+
+```{r}
+data.frame(
+  R2 = R2(predictions_q, y_test),
+  RMSE = RMSE(predictions_q, y_test),
+  MAE = MAE(predictions_q, y_test)
+)
+```
+
+# Comparando la complejidad del modelo
+
+```{r}
+BIC(pois_model)
+BIC(mod_quasi)
+BIC(bn_mod)
+```
+
+```{r}
+AIC(pois_model)
+AIC(mod_quasi)
+AIC(bn_mod)
+```
+
