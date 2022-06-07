@@ -221,18 +221,3 @@ data.frame(
   MAE = MAE(predictions_q, y_test)
 )
 ```
-
-# Comparando la complejidad del modelo
-
-```{r}
-BIC(pois_model)
-BIC(mod_quasi)
-BIC(bn_mod)
-```
-
-```{r}
-AIC(pois_model)
-AIC(mod_quasi)
-AIC(bn_mod)
-```
-
